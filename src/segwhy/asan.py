@@ -42,7 +42,6 @@ _KINDS = {
     "stack-use-after-scope": "use_after_scope",
     "FPE": "div_zero",
     "ABRT": "abort",
-    "BUS": "bus_error",
     "ILL": "illegal_instruction",
     "memcpy-param-overlap": "overlap",
     "negative-size-param": "negative_size",
@@ -197,6 +196,32 @@ def parse_report(report: str) -> Optional[Diagnosis]:
     return diag
 
 
+_UBSAN = re.compile(r"^(?P<file>\S+?):(?P<line>\d+):(?P<col>\d+): runtime error: (?P<msg>.+)$")
+_UBSAN_KINDS = (
+    ("division by zero", "div_zero"),
+    ("null pointer", "null_deref"),
+)
+
+
+def parse_ubsan(text: str) -> List[Diagnosis]:
+    """UndefinedBehaviorSanitizer reports ("file.c:5:18: runtime error: ...")."""
+    lines = text.splitlines()
+    found: List[Diagnosis] = []
+    for index, line in enumerate(lines):
+        match = _UBSAN.match(line.strip())
+        if not match:
+            continue
+        message = match.group("msg").strip()
+        kind = next((k for needle, k in _UBSAN_KINDS if needle in message), "ubsan")
+        frames = _stack_after(lines, index)
+        if not any(f.is_user_code() for f in frames):
+            frames.insert(0, Frame(file=match.group("file"), line=int(match.group("line")),
+                                   column=int(match.group("col"))))
+        found.append(Diagnosis(kind=kind, source="ubsan", frames=frames, raw_kind=message,
+                               raw="\n".join(lines[index:index + 1 + len(frames)])))
+    return found
+
+
 _LEAK_SUMMARY = re.compile(r"SUMMARY: \w+Sanitizer: (\d+) byte\(s\) leaked in (\d+) allocation\(s\)")
 
 
@@ -257,7 +282,8 @@ def _classify(diag: Diagnosis, raw_kind: str, report: str, pc: Optional[int]) ->
         return "double_free"
     if raw_kind.startswith("attempting free"):
         return "bad_free"
-    if raw_kind == "SEGV":
+    if raw_kind in ("SEGV", "BUS"):
+        # macOS reports most invalid accesses (string literal writes included) as BUS.
         addr = diag.address
         if "address points to the zero page" in report or (addr is not None and addr < NULL_PAGE_LIMIT):
             return "null_in_library" if diag.library_function() else "null_deref"
@@ -265,5 +291,5 @@ def _classify(diag: Diagnosis, raw_kind: str, report: str, pc: Optional[int]) ->
             return "stack_exhaustion"
         if diag.access == "WRITE" and addr is not None and pc is not None and abs(addr - pc) < 0x4000000:
             return "readonly_write"
-        return "wild_pointer"
+        return "wild_pointer" if raw_kind == "SEGV" else "bus_error"
     return "unknown"

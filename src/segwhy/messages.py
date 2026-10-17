@@ -20,6 +20,7 @@ LABELS = {
         "crash_bus": "Bus error",
         "crash_ill": "Illegal instruction",
         "crash_signal": "Crash",
+        "crash_ub": "Undefined behavior",
         "ok": "No crash, no memory error detected.",
         "ok_gdb": "No crash.",
         "ok_gdb_note": "(Built without AddressSanitizer: silent memory errors can't be detected. Run segwhy --flags.)",
@@ -54,6 +55,7 @@ LABELS = {
         "crash_bus": "Erreur de bus",
         "crash_ill": "Instruction illégale",
         "crash_signal": "Plantage",
+        "crash_ub": "Comportement indéfini",
         "ok": "Aucun plantage, aucune erreur mémoire détectée.",
         "ok_gdb": "Aucun plantage.",
         "ok_gdb_note": "(Compilé sans AddressSanitizer : les erreurs mémoire silencieuses ne sont pas détectées. "
@@ -101,6 +103,7 @@ TITLES = {
     "bus_error": "crash_bus",
     "illegal_instruction": "crash_ill",
     "signal": "crash_signal",
+    "ubsan": "crash_ub",
     "unknown": "crash_memory",
 }
 
@@ -195,7 +198,9 @@ HINTS = {
         "use_after_scope": "The variable no longer exists outside its { } block. Declare it in a wider scope.",
         "overlap": "Use memmove() when the source and destination can overlap.",
         "negative_size": "Check the size computation: it is negative (or huge after conversion).",
-        "div_zero": "Check that the divisor is not 0 before dividing (or using %).",
+        "div_zero": "Check that the divisor is not 0 before dividing (or using %). Some processors "
+                    "(Apple Silicon, ARM) don't crash here and silently return 0.",
+        "ubsan": "This is undefined behavior: the program may seem to work today and break elsewhere.",
         "abort": "If an assert() failed, its message is just above. Otherwise malloc detected a corruption: "
                  "look for an overflow or a double free earlier.",
         "bus_error": "Check pointer casts and that the memory you access still exists (mmap'd file, alignment).",
@@ -234,7 +239,10 @@ HINTS = {
         "use_after_scope": "La variable n'existe plus en dehors de son bloc { }. Déclare-la plus haut.",
         "overlap": "Utilise memmove() quand la source et la destination peuvent se chevaucher.",
         "negative_size": "Vérifie le calcul de la taille : il est négatif (ou énorme après conversion).",
-        "div_zero": "Vérifie que le diviseur n'est pas 0 avant de diviser (ou d'utiliser %).",
+        "div_zero": "Vérifie que le diviseur n'est pas 0 avant de diviser (ou d'utiliser %). Certains "
+                    "processeurs (Apple Silicon, ARM) ne plantent pas ici et renvoient 0 en silence.",
+        "ubsan": "C'est un comportement indéfini : le programme peut sembler marcher aujourd'hui et "
+                 "casser ailleurs.",
         "abort": "Si un assert() a échoué, son message est juste au-dessus. Sinon malloc a détecté une "
                  "corruption : cherche un débordement ou un double free plus tôt.",
         "bus_error": "Vérifie les conversions de pointeurs et que la mémoire accédée existe encore.",
@@ -247,11 +255,11 @@ HINTS = {
 FLAGS_TEXT = {
     EN: """To get file, line and reason for every memory error, build with:
 
-  Compile flags:  -g -O0 -fsanitize=address -fno-omit-frame-pointer
+  Compile flags:  -g -O0 -fsanitize=address -fno-omit-frame-pointer -fno-common
   Link flags:     -fsanitize=address
 
 Makefile:
-  CFLAGS  += -g -O0 -fsanitize=address -fno-omit-frame-pointer
+  CFLAGS  += -g -O0 -fsanitize=address -fno-omit-frame-pointer -fno-common
   LDFLAGS += -fsanitize=address
 
 CMake:
@@ -264,11 +272,11 @@ Then run:  segwhy ./your_program [args...]
 """,
     FR: """Pour avoir le fichier, la ligne et la raison de chaque erreur mémoire, compile avec :
 
-  Options de compilation :  -g -O0 -fsanitize=address -fno-omit-frame-pointer
+  Options de compilation :  -g -O0 -fsanitize=address -fno-omit-frame-pointer -fno-common
   Options d'édition de liens :  -fsanitize=address
 
 Makefile :
-  CFLAGS  += -g -O0 -fsanitize=address -fno-omit-frame-pointer
+  CFLAGS  += -g -O0 -fsanitize=address -fno-omit-frame-pointer -fno-common
   LDFLAGS += -fsanitize=address
 
 CMake :

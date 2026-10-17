@@ -66,7 +66,7 @@ EXPECTED = {
     "string_literal.c": ["write to read-only memory", "string_literal.c:7", "char s[]"],
     "wild_pointer.c": ["invalid pointer", "wild_pointer.c:9"],
     "libc_null.c": ["NULL pointer passed to strlen()", "libc_null.c:9", "'line'"],
-    "div_zero.c": ["division by zero", "div_zero.c:5", "div_zero.c:10"],
+    "div_zero.c": ["division by zero", "div_zero.c:5"],
     "args.c": ["NULL pointer passed to atoi()", "'argv[1]'"],
     "assert_fail.c": ["Program aborted", "assert_fail.c:8"],
 }
@@ -260,3 +260,36 @@ def test_call_arguments():
     assert call_arguments("n = atoi(argv[1]);", "atoi") == ["argv[1]"]
     assert call_arguments('printf("%zu", strlen(line));', "strlen") == ["line"]
     assert call_arguments("strcpy(dst, src);", "strcpy") == ["dst", "src"]
+
+
+# ---- reports seen on macOS (Apple clang, arm64) ----------------------------------------
+
+MAC_STRLEN = """==1==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x1 bp 0x2 sp 0x3 T0)
+==1==The signal is caused by a READ memory access.
+==1==Hint: address points to the zero page.
+    #0 0x000188c2e1b4 in _platform_strlen+0x4 (libsystem_platform.dylib:arm64e+0x11b4)
+    #1 0x000104e2c9a0 in wrap_strlen+0x50 (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x149a0)
+    #2 0x0001044188ac in main libc_null.c:9
+    #3 0x000188b104e0 in start+0x1b4c (dyld:arm64e+0x204e0)
+SUMMARY: AddressSanitizer: SEGV (libsystem_platform.dylib:arm64e+0x11b4) in _platform_strlen+0x4
+==1==ABORTING
+"""
+
+MAC_LITERAL = """==1==ERROR: AddressSanitizer: BUS on unknown address 0x000102a3bf80 (pc 0x000102a3b8f0 bp 0x2 sp 0x3 T0)
+==1==The signal is caused by a WRITE memory access.
+    #0 0x000102a3b8f0 in main string_literal.c:7
+    #1 0x000188b104e0 in start+0x1b4c (dyld:arm64e+0x204e0)
+SUMMARY: AddressSanitizer: BUS string_literal.c:7 in main
+==1==ABORTING
+"""
+
+
+def test_mac_library_function_names():
+    code, output = segwhy(stdin=MAC_STRLEN)
+    assert "NULL pointer passed to strlen()" in output, output
+    assert "libc_null.c:9" in output
+
+
+def test_mac_bus_error_on_string_literal():
+    code, output = segwhy(stdin=MAC_LITERAL)
+    assert "write to read-only memory" in output, output

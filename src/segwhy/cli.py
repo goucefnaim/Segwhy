@@ -13,14 +13,22 @@ from typing import List, Optional
 
 from . import __version__
 from . import messages as M
-from .asan import find_reports, parse_leaks, parse_report
+from .asan import find_reports, parse_leaks, parse_report, parse_ubsan
 from .gdbrun import diagnosis_from_gdb, gdb_available, run_with_gdb
 from .model import display_path
 from .render import Style, render
 
 SOURCE_EXTENSIONS = (".c", ".o", ".a")
-ASAN_COMPILE_FLAGS = ["-g", "-O0", "-fsanitize=address", "-fno-omit-frame-pointer"]
+# Tried in order. -fno-common lets ASan see global arrays declared without
+# initializer (Apple clang still puts them in "common" sections). The division
+# check matters on ARM (Apple Silicon), where x / 0 silently returns 0.
+SANITIZER_FLAG_SETS = [
+    ["-g", "-O0", "-fsanitize=address,integer-divide-by-zero",
+     "-fno-sanitize-recover=integer-divide-by-zero", "-fno-omit-frame-pointer", "-fno-common"],
+    ["-g", "-O0", "-fsanitize=address", "-fno-omit-frame-pointer", "-fno-common"],
+]
 PLAIN_COMPILE_FLAGS = ["-g", "-O0"]
+_STDERR_KEEP = 1 << 20  # bytes of program stderr kept to look for UBSan reports
 
 
 class Options:
@@ -112,16 +120,23 @@ def has_asan(binary: str) -> bool:
 _ASAN_NOISE = b"AddressSanitizer:DEADLYSIGNAL\n"
 
 
-def _run_filtering_stderr(command: List[str], env: dict) -> subprocess.CompletedProcess:
+def _run_filtering_stderr(command: List[str], env: dict, keep: Optional[bytearray] = None) -> subprocess.CompletedProcess:
     """Run the program with the real stdin/stdout, forwarding its stderr live
-    minus the "AddressSanitizer:DEADLYSIGNAL" line ASan prints even with log_path."""
+    minus the "AddressSanitizer:DEADLYSIGNAL" line ASan prints even with log_path.
+    The last part of stderr is copied into `keep` (UBSan writes its reports there)."""
     import threading
 
     process = subprocess.Popen(command, env=env, stderr=subprocess.PIPE)
     out = getattr(sys.stderr, "buffer", None)
 
     def write(data: bytes) -> None:
-        if data and out is not None:
+        if not data:
+            return
+        if keep is not None:
+            keep.extend(data)
+            if len(keep) > _STDERR_KEEP:
+                del keep[: len(keep) - _STDERR_KEEP]
+        if out is not None:
             sys.stdout.flush()
             out.write(data)
             out.flush()
@@ -171,9 +186,15 @@ def run_with_asan(binary: str, args: List[str], opts: Options, style: Style, wor
         "symbolize=1",
     ]
     user = os.environ.get("ASAN_OPTIONS", "")
-    env = dict(os.environ, ASAN_OPTIONS=":".join(([user] if user else []) + ours))
+    user_ub = os.environ.get("UBSAN_OPTIONS", "")
+    env = dict(
+        os.environ,
+        ASAN_OPTIONS=":".join(([user] if user else []) + ours),
+        UBSAN_OPTIONS=":".join(([user_ub] if user_ub else []) + ["print_stacktrace=0", "color=never"]),
+    )
+    stderr_copy = bytearray()
     try:
-        completed = _run_filtering_stderr([binary, *args], env)
+        completed = _run_filtering_stderr([binary, *args], env, stderr_copy)
     except KeyboardInterrupt:
         return 130
     except OSError as error:
@@ -189,6 +210,8 @@ def run_with_asan(binary: str, args: List[str], opts: Options, style: Style, wor
             pass
 
     reports = [d for d in (parse_report(r) for r in find_reports(text)) if d is not None]
+    if not reports:
+        reports = parse_ubsan(stderr_copy.decode("utf-8", errors="replace"))
     code = exit_code_of(completed.returncode)
     if reports:
         say()
@@ -259,14 +282,15 @@ def compile_mode(opts: Options, style: Style) -> int:
     workdir = tempfile.mkdtemp(prefix="segwhy-")
     binary = os.path.join(workdir, os.path.splitext(os.path.basename(first_source))[0])
     try:
-        with_asan = subprocess.run(
-            [*compiler, *ASAN_COMPILE_FLAGS, *opts.compile_args, "-o", binary, "-lm"],
-            capture_output=True, text=True, errors="replace",
-        )
-        if with_asan.returncode == 0:
-            if with_asan.stderr.strip():
-                sys.stderr.write(with_asan.stderr)
-            return run_with_asan(binary, opts.program_args, opts, style, workdir)
+        for flags in SANITIZER_FLAG_SETS:
+            with_asan = subprocess.run(
+                [*compiler, *flags, *opts.compile_args, "-o", binary, "-lm"],
+                capture_output=True, text=True, errors="replace",
+            )
+            if with_asan.returncode == 0:
+                if with_asan.stderr.strip():
+                    sys.stderr.write(with_asan.stderr)
+                return run_with_asan(binary, opts.program_args, opts, style, workdir)
 
         plain = subprocess.run(
             [*compiler, *PLAIN_COMPILE_FLAGS, *opts.compile_args, "-o", binary, "-lm"],
@@ -318,6 +342,7 @@ def pipe_mode(opts: Options) -> int:
         pass
     text = "".join(chunks)
     reports = [d for d in (parse_report(r) for r in find_reports(text)) if d is not None]
+    reports += parse_ubsan(text)
     for diag in reports:
         print()
         print(render(diag, opts.lang, opts.verbose, style))

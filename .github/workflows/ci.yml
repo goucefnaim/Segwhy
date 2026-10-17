@@ -42,8 +42,12 @@ jobs:
           grep -E "FAILED|ERROR|passed|failed" pytest.log | annotate "pytest summary" || true
           { cc --version; uname -a; } 2>&1 | annotate "toolchain"
           cd tests/crashes
-          for f in null_deref heap_overflow recursion libc_null string_literal double_free; do
+          for f in recursion string_literal global_array div_zero libc_null args; do
             NO_COLOR=1 segwhy "$f.c" 2>&1 | annotate "segwhy $f.c"
           done
-          NO_COLOR=1 cc -g -fsanitize=address -fno-omit-frame-pointer null_deref.c -o /tmp/nd 2>&1 | annotate "build"
-          ASAN_OPTIONS=color=never /tmp/nd 2>&1 | annotate "raw asan null_deref"
+          NO_COLOR=1 segwhy project/main.c project/parser.c 2>&1 | annotate "segwhy project"
+          F="-g -O0 -fsanitize=address -fno-omit-frame-pointer -fno-common"
+          for f in recursion string_literal global_array; do
+            cc $F $f.c -o /tmp/$f 2>&1; ASAN_OPTIONS=color=never /tmp/$f 2>&1 | grep -v "^ *x\[" | head -40 | annotate "raw $f"
+          done
+          cc $F project/main.c project/parser.c -o /tmp/proj && ASAN_OPTIONS=color=never /tmp/proj 2>&1 | head -30 | annotate "raw project"

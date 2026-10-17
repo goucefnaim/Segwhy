@@ -61,12 +61,14 @@ class Frame:
         if not self.func:
             return None
         name = self.func.split("(")[0].strip()
+        name = re.sub(r"\+0x[0-9a-fA-F]+$", "", name)  # macOS: atoi+0x50
         for prefix in ("___interceptor_", "__interceptor_", "__GI_", "__libc_"):
             if name.startswith(prefix):
                 name = name[len(prefix):]
         name = name.lstrip("_")
-        if name.startswith("GI_"):
-            name = name[3:].lstrip("_")
+        for prefix in ("GI_", "platform_", "wrap_", "interceptor_"):  # glibc, macOS libplatform, ASan
+            if name.startswith(prefix):
+                name = name[len(prefix):].lstrip("_")
         previous = None
         while previous != name:
             previous = name
