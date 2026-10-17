@@ -324,3 +324,25 @@ def test_mac_paths_without_directory():
     assert "project/parser.c:17" in output, output
     assert "'value' is NULL" in output, output
     assert "rebuild with -g" not in output
+
+MAC_LITERAL_NO_ADDRESS = """==1==ERROR: AddressSanitizer: BUS on unknown address (pc 0x0001040b8888 bp 0x2 sp 0x3 T0)
+==1==The signal is caused by a WRITE memory access.
+    #0 0x0001040b8888 in main string_literal.c:7
+SUMMARY: AddressSanitizer: BUS string_literal.c:7 in main
+==1==ABORTING
+"""
+
+
+def test_mac_bus_error_without_address():
+    code, output = segwhy(stdin=MAC_LITERAL_NO_ADDRESS)
+    assert "write to read-only memory" in output, output
+
+
+def test_ubsan_division_report():
+    # macOS clang writes this to ASan's log file, gcc to stderr: both are parsed.
+    from segwhy.asan import parse_ubsan
+    text = "div_zero.c:5:18: runtime error: division by zero\n" \
+           "SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior div_zero.c:5:18\n"
+    reports = parse_ubsan(text)
+    assert len(reports) == 1 and reports[0].kind == "div_zero"
+    assert reports[0].frames[0].line == 5

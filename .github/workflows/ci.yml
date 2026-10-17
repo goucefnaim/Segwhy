@@ -23,9 +23,7 @@ jobs:
         run: pytest -q
 
   macos:
-    # Not tested by the author yet: kept non-blocking until it is green.
     runs-on: macos-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,13 +33,7 @@ jobs:
         run: pip install -e . pytest
       - name: Run tests
         run: pytest -q -rfE --tb=short 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
-      - name: Report (readable as annotations)
-        if: always()
+      - name: Report failures (readable as annotations)
+        if: failure()
         run: |
-          annotate() { python3 -c 'import sys; t=sys.stdin.read()[-60000:]; print("::notice title=%s::" % sys.argv[1] + t.replace("%","%25").replace("\r","").replace("\n","%0A"))' "$1"; }
-          grep -E "FAILED|ERROR|passed|failed" pytest.log | annotate "pytest summary" || true
-          cd tests/crashes
-          U="-g -O0 -fsanitize=address,integer-divide-by-zero -fno-sanitize-recover=integer-divide-by-zero -fno-omit-frame-pointer -fno-common"
-          { cc $U div_zero.c -o /tmp/dz -lm; echo "build exit=$?"; UBSAN_OPTIONS=print_stacktrace=0 /tmp/dz; echo "run exit=$?";
-            cc -g -O0 div_zero.c -o /tmp/dz0; /tmp/dz0; echo "plain run exit=$?"; } 2>&1 | head -30 | annotate "raw div_zero"
-          cc $U string_literal.c -o /tmp/sl && ASAN_OPTIONS=color=never /tmp/sl 2>&1 | grep -v "^ *x\[\|fp = " | head -30 | annotate "raw string_literal"
+          grep -E "FAILED|ERROR|passed|failed" pytest.log | python3 -c 'import sys; t=sys.stdin.read()[-60000:]; print("::notice title=pytest summary::" + t.replace("%","%25").replace("\r","").replace("\n","%0A"))'

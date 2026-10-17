@@ -295,5 +295,7 @@ def _classify(diag: Diagnosis, raw_kind: str, report: str, pc: Optional[int]) ->
         # doesn't always say whether the access was a READ or a WRITE.
         if near_code and (diag.access == "WRITE" or (raw_kind == "BUS" and diag.access != "READ")):
             return "readonly_write"
+        if raw_kind == "BUS" and addr is None and diag.access == "WRITE":
+            return "readonly_write"  # macOS sometimes omits the address for these
         return "wild_pointer" if raw_kind == "SEGV" else "bus_error"
     return "unknown"

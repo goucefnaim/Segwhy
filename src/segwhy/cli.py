@@ -211,7 +211,8 @@ def run_with_asan(binary: str, args: List[str], opts: Options, style: Style, wor
 
     reports = [d for d in (parse_report(r) for r in find_reports(text)) if d is not None]
     if not reports:
-        reports = parse_ubsan(stderr_copy.decode("utf-8", errors="replace"))
+        # UBSan writes to ASan's log file on macOS (clang), to stderr with gcc.
+        reports = parse_ubsan(text + "\n" + stderr_copy.decode("utf-8", errors="replace"))
     finder = SourceFinder([a for a in opts.compile_args if a.endswith(".c")])
     reports = [resolve_frames(d, finder) for d in reports]
     code = exit_code_of(completed.returncode)
@@ -224,7 +225,10 @@ def run_with_asan(binary: str, args: List[str], opts: Options, style: Style, wor
         say(style.title("💥 " + M.LABELS[opts.lang]["killed"].format(signal=_signal_name(-completed.returncode))))
         return code
     say()
-    say(style.good("✅ " + M.LABELS[opts.lang]["ok"]))
+    line = style.good("✅ " + M.LABELS[opts.lang]["ok"])
+    if code != 0:
+        line += " " + style.dim(M.LABELS[opts.lang]["exit_code"].format(code=code))
+    say(line)
     leaks = parse_leaks(text)
     if leaks:
         count, size, frame = leaks

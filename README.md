@@ -112,8 +112,11 @@ returns 1, a crash under gdb returns 128 + the signal number (139 for a segfault
 
 - The crash line is where the program died, not always where the bug is.
   AddressSanitizer (the default in `.c` mode) usually catches the real bug earlier.
-- Without AddressSanitizer, segwhy needs gdb, so this fallback works on Linux only for now (lldb on macOS is planned).
-  On macOS, build with `segwhy --flags` and you get the full AddressSanitizer experience.
+- macOS (Apple clang, Intel and Apple Silicon) is tested in CI with AddressSanitizer, which is what
+  `segwhy main.c` uses. For an existing program built *without* AddressSanitizer, segwhy needs gdb,
+  so that fallback is Linux-only for now (lldb on macOS is planned): rebuild with `segwhy --flags`.
+- On ARM processors (Apple Silicon, Raspberry Pi), a division by zero doesn't crash: it silently gives 0.
+  segwhy's `.c` mode turns on the check that catches it anyway.
 - Under gdb, `argv[0]` is the absolute path of the program.
 - AddressSanitizer makes the program about 2x slower: fine for debugging, not for production builds.
 
