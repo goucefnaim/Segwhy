@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# segwhy
+tests/.asan_probe
+a.out
+*.o
