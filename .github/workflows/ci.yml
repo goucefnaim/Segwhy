@@ -40,16 +40,8 @@ jobs:
         run: |
           annotate() { python3 -c 'import sys; t=sys.stdin.read()[-60000:]; print("::notice title=%s::" % sys.argv[1] + t.replace("%","%25").replace("\r","").replace("\n","%0A"))' "$1"; }
           grep -E "FAILED|ERROR|passed|failed" pytest.log | annotate "pytest summary" || true
-          { cc --version; uname -a; } 2>&1 | annotate "toolchain"
           cd tests/crashes
-          for f in recursion string_literal global_array div_zero libc_null args; do
-            NO_COLOR=1 segwhy "$f.c" 2>&1 | annotate "segwhy $f.c"
-          done
-          NO_COLOR=1 segwhy project/main.c project/parser.c 2>&1 | annotate "segwhy project"
-          F="-g -O0 -fsanitize=address -fno-omit-frame-pointer -fno-common"
-          for f in recursion string_literal global_array; do
-            cc $F $f.c -o /tmp/$f 2>&1; ASAN_OPTIONS=color=never /tmp/$f 2>&1 | grep -v "^ *x\[" | head -40 | annotate "raw $f"
-          done
           U="-g -O0 -fsanitize=address,integer-divide-by-zero -fno-sanitize-recover=integer-divide-by-zero -fno-omit-frame-pointer -fno-common"
-          { cc $U div_zero.c -o /tmp/dz -lm; echo "build exit=$?"; UBSAN_OPTIONS=print_stacktrace=0 /tmp/dz; echo "run exit=$?"; } 2>&1 | head -30 | annotate "raw div_zero"
-          cc $F project/main.c project/parser.c -o /tmp/proj && ASAN_OPTIONS=color=never /tmp/proj 2>&1 | head -30 | annotate "raw project"
+          { cc $U div_zero.c -o /tmp/dz -lm; echo "build exit=$?"; UBSAN_OPTIONS=print_stacktrace=0 /tmp/dz; echo "run exit=$?";
+            cc -g -O0 div_zero.c -o /tmp/dz0; /tmp/dz0; echo "plain run exit=$?"; } 2>&1 | head -30 | annotate "raw div_zero"
+          cc $U string_literal.c -o /tmp/sl && ASAN_OPTIONS=color=never /tmp/sl 2>&1 | grep -v "^ *x\[\|fp = " | head -30 | annotate "raw string_literal"

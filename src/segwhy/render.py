@@ -275,6 +275,8 @@ def _callers(diag: Diagnosis, main: Optional[Frame]):
     frames = diag.user_frames()
     if main in frames:
         frames = frames[frames.index(main) + 1:]
+    elif main is not None and frames and frames[0].func == main.func and frames[0].file == main.file:
+        frames = frames[1:]  # main was rebuilt from the source (same function, better line)
     grouped = []
     for frame in frames:
         if grouped and grouped[-1][0].func == frame.func and grouped[-1][0].file == frame.file \
