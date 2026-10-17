@@ -289,7 +289,11 @@ def _classify(diag: Diagnosis, raw_kind: str, report: str, pc: Optional[int]) ->
             return "null_in_library" if diag.library_function() else "null_deref"
         if diag.recursive_function():
             return "stack_exhaustion"
-        if diag.access == "WRITE" and addr is not None and pc is not None and abs(addr - pc) < 0x4000000:
+        near_code = addr is not None and pc is not None and abs(addr - pc) < 0x4000000
+        # A write close to the code is a write into the program's read-only
+        # data: almost always a string literal. macOS reports these as BUS and
+        # doesn't always say whether the access was a READ or a WRITE.
+        if near_code and (diag.access == "WRITE" or (raw_kind == "BUS" and diag.access != "READ")):
             return "readonly_write"
         return "wild_pointer" if raw_kind == "SEGV" else "bus_error"
     return "unknown"

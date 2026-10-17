@@ -53,7 +53,8 @@ class Frame:
         if os.path.isabs(path):
             return True
         # Relative paths like "nptl/pthread_kill.c" come from system libraries
-        # built elsewhere: only trust the ones that exist here.
+        # built elsewhere: only trust the ones that exist here (resolve_frames
+        # has already turned the user's own relative paths into real ones).
         return os.path.exists(path)
 
     def clean_func(self) -> Optional[str]:
@@ -111,6 +112,12 @@ class Diagnosis:
                 calls = [f for f in self.user_frames() if f.func == recursive]
                 if len(calls) > 1:
                     return calls[1]
+            else:
+                top = next(iter(self.user_frames()), None)
+                if top is not None:
+                    line = find_recursive_call(top.file, top.func, top.line)
+                    if line is not None:
+                        return Frame(func=top.func, file=top.file, line=line)
         user = self.user_frames()
         if user:
             return user[0]
@@ -140,8 +147,107 @@ class Diagnosis:
         name, count = max(counts.items(), key=lambda item: item[1])
         return name if count >= 8 else None
 
+    def self_calling_function(self) -> Optional[str]:
+        """Recursive function seen in the stack, or found in the source code."""
+        name = self.recursive_function()
+        if name:
+            return name
+        top = next(iter(self.user_frames()), None)
+        if top is not None and find_recursive_call(top.file, top.func, top.line) is not None:
+            return top.func
+        return None
+
     def has_debug_info(self) -> bool:
         return bool(self.user_frames())
+
+
+_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "build", "dist", ".cache"}
+
+
+class SourceFinder:
+    """Find the real file behind a path from a report.
+
+    macOS reports only "parser.c" for "project/parser.c", so a relative path
+    that doesn't exist is looked up by name among the files given to segwhy,
+    then in the current directory tree."""
+
+    def __init__(self, sources: Optional[List[str]] = None, max_files: int = 20000, max_depth: int = 6):
+        self.by_name = {}
+        for source in sources or []:
+            self.by_name.setdefault(os.path.basename(source), os.path.abspath(source))
+        self.max_files = max_files
+        self.max_depth = max_depth
+        self._scanned = False
+
+    def _scan(self) -> None:
+        self._scanned = True
+        count = 0
+        root = os.getcwd()
+        base_depth = root.rstrip(os.sep).count(os.sep)
+        for directory, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
+            if directory.count(os.sep) - base_depth >= self.max_depth:
+                dirs[:] = []
+            for name in files:
+                if name.endswith((".c", ".h", ".cc", ".cpp", ".inc")):
+                    self.by_name.setdefault(name, os.path.join(directory, name))
+                count += 1
+                if count > self.max_files:
+                    return
+
+    def resolve(self, path: Optional[str]) -> Optional[str]:
+        if not path or os.path.isabs(path) or os.path.exists(path):
+            return path
+        if path.startswith("../") or path.startswith("<") or "/" in path.strip("./"):
+            return path  # system library paths like nptl/pthread_kill.c
+        name = os.path.basename(path)
+        if name not in self.by_name and not self._scanned:
+            self._scan()
+        return self.by_name.get(name, path)
+
+
+def resolve_frames(diag: "Diagnosis", finder: SourceFinder) -> "Diagnosis":
+    for frame in [*diag.frames, diag.freed_at, diag.allocated_at]:
+        if frame is not None and frame.file:
+            frame.file = finder.resolve(frame.file)
+    return diag
+
+
+def find_recursive_call(path: Optional[str], func: Optional[str], near_line: Optional[int]) -> Optional[int]:
+    """Line where `func` calls itself, read from the source (for reports that
+    show only the top of an infinite recursion, like macOS)."""
+    if not path or not func or not near_line:
+        return None
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return None
+    call = re.compile(r"\b" + re.escape(func) + r"\s*\(")
+    start = None
+    for number in range(min(near_line, len(lines)), 0, -1):
+        text = lines[number - 1]
+        if call.search(text) and ";" not in text.split("//")[0]:
+            start = number  # the function's definition line
+            break
+    if start is None:
+        return None
+    depth, opened = 0, False
+    for number in range(start, len(lines) + 1):
+        text = re.sub(r'"(?:\\.|[^"\\])*"', '""', lines[number - 1].split("//")[0])
+        if opened and call.search(text):
+            return number
+        if number == start and opened is False and "{" in text:
+            # Body starting on the definition line: look after the brace.
+            after = text.split("{", 1)[1]
+            if call.search(after):
+                return number
+        depth += text.count("{") - text.count("}")
+        if "{" in text:
+            opened = True
+        if opened and depth <= 0:
+            return None
+    return None
 
 
 def display_path(path: Optional[str]) -> str:

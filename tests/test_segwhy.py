@@ -293,3 +293,34 @@ def test_mac_library_function_names():
 def test_mac_bus_error_on_string_literal():
     code, output = segwhy(stdin=MAC_LITERAL)
     assert "write to read-only memory" in output, output
+
+MAC_RECURSION = """==1==ERROR: AddressSanitizer: stack-overflow on address 0x00016d107ffc (pc 0x0001024fc81c bp 0x2 sp 0x3 T0)
+    #0 0x0001024fc81c in factorial recursion.c:4
+
+SUMMARY: AddressSanitizer: stack-overflow recursion.c:4 in factorial
+==1==ABORTING
+"""
+
+MAC_PROJECT = """==1==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x1 bp 0x2 sp 0x3 T0)
+==1==The signal is caused by a READ memory access.
+==1==Hint: address points to the zero page.
+    #0 0x000100f2c81c in value_length parser.c:17
+    #1 0x000100f2c9a0 in parse_config parser.c:29
+    #2 0x000100f2c3a8 in main main.c:9
+    #3 0x000188b104e0 in start+0x1b4c (dyld:arm64e+0x204e0)
+SUMMARY: AddressSanitizer: SEGV parser.c:17 in value_length
+==1==ABORTING
+"""
+
+
+def test_mac_recursion_with_single_frame():
+    code, output = segwhy(stdin=MAC_RECURSION)
+    assert "factorial() calls itself endlessly" in output, output
+    assert "recursion.c:5" in output, output  # the recursive call, not the opening brace
+
+
+def test_mac_paths_without_directory():
+    code, output = segwhy(stdin=MAC_PROJECT)
+    assert "project/parser.c:17" in output, output
+    assert "'value' is NULL" in output, output
+    assert "rebuild with -g" not in output

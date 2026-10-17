@@ -50,4 +50,6 @@ jobs:
           for f in recursion string_literal global_array; do
             cc $F $f.c -o /tmp/$f 2>&1; ASAN_OPTIONS=color=never /tmp/$f 2>&1 | grep -v "^ *x\[" | head -40 | annotate "raw $f"
           done
+          U="-g -O0 -fsanitize=address,integer-divide-by-zero -fno-sanitize-recover=integer-divide-by-zero -fno-omit-frame-pointer -fno-common"
+          { cc $U div_zero.c -o /tmp/dz -lm; echo "build exit=$?"; UBSAN_OPTIONS=print_stacktrace=0 /tmp/dz; echo "run exit=$?"; } 2>&1 | head -30 | annotate "raw div_zero"
           cc $F project/main.c project/parser.c -o /tmp/proj && ASAN_OPTIONS=color=never /tmp/proj 2>&1 | head -30 | annotate "raw project"

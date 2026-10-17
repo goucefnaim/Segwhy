@@ -15,7 +15,7 @@ from . import __version__
 from . import messages as M
 from .asan import find_reports, parse_leaks, parse_report, parse_ubsan
 from .gdbrun import diagnosis_from_gdb, gdb_available, run_with_gdb
-from .model import display_path
+from .model import SourceFinder, display_path, resolve_frames
 from .render import Style, render
 
 SOURCE_EXTENSIONS = (".c", ".o", ".a")
@@ -212,6 +212,8 @@ def run_with_asan(binary: str, args: List[str], opts: Options, style: Style, wor
     reports = [d for d in (parse_report(r) for r in find_reports(text)) if d is not None]
     if not reports:
         reports = parse_ubsan(stderr_copy.decode("utf-8", errors="replace"))
+    finder = SourceFinder([a for a in opts.compile_args if a.endswith(".c")])
+    reports = [resolve_frames(d, finder) for d in reports]
     code = exit_code_of(completed.returncode)
     if reports:
         say()
@@ -226,7 +228,7 @@ def run_with_asan(binary: str, args: List[str], opts: Options, style: Style, wor
     leaks = parse_leaks(text)
     if leaks:
         count, size, frame = leaks
-        where = f"{display_path(frame.file)}:{frame.line}" if frame else "?"
+        where = f"{display_path(finder.resolve(frame.file))}:{frame.line}" if frame else "?"
         say("   " + M.LABELS[opts.lang]["leaks"].format(count=count, bytes=size, where=where))
     return code
 
@@ -343,6 +345,8 @@ def pipe_mode(opts: Options) -> int:
     text = "".join(chunks)
     reports = [d for d in (parse_report(r) for r in find_reports(text)) if d is not None]
     reports += parse_ubsan(text)
+    finder = SourceFinder()
+    reports = [resolve_frames(d, finder) for d in reports]
     for diag in reports:
         print()
         print(render(diag, opts.lang, opts.verbose, style))

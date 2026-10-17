@@ -138,7 +138,7 @@ def reason_text(diag: Diagnosis, lang: str) -> str:
     reasons = M.REASONS[lang]
     access = {"READ": reasons["read"], "WRITE": reasons["write"]}.get(diag.access or "", reasons["access"])
     if diag.kind == "stack_exhaustion":
-        func = diag.recursive_function()
+        func = diag.self_calling_function()
         if func:
             return reasons["stack_exhaustion"].format(func=func)
         return reasons["stack_exhaustion_plain"]
@@ -179,7 +179,7 @@ def hint_text(diag: Diagnosis, lang: str) -> str:
         else:
             parts.append(hints["null_library"].format(func=func))
     elif kind == "stack_exhaustion":
-        func = diag.recursive_function()
+        func = diag.self_calling_function()
         parts.append(hints["recursion"].format(func=func) if func else hints["stack_big"])
     elif kind in ("heap_overflow", "stack_array_overflow", "global_overflow"):
         parts.extend(_bounds_hint(diag, hints))
