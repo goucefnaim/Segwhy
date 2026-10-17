@@ -34,4 +34,16 @@ jobs:
       - name: Install segwhy and pytest
         run: pip install -e . pytest
       - name: Run tests
-        run: pytest -q
+        run: pytest -q -rfE --tb=short 2>&1 | tee pytest.log; exit ${PIPESTATUS[0]}
+      - name: Report (readable as annotations)
+        if: always()
+        run: |
+          annotate() { python3 -c 'import sys; t=sys.stdin.read()[-60000:]; print("::notice title=%s::" % sys.argv[1] + t.replace("%","%25").replace("\r","").replace("\n","%0A"))' "$1"; }
+          grep -E "FAILED|ERROR|passed|failed" pytest.log | annotate "pytest summary" || true
+          { cc --version; uname -a; } 2>&1 | annotate "toolchain"
+          cd tests/crashes
+          for f in null_deref heap_overflow recursion libc_null string_literal double_free; do
+            NO_COLOR=1 segwhy "$f.c" 2>&1 | annotate "segwhy $f.c"
+          done
+          NO_COLOR=1 cc -g -fsanitize=address -fno-omit-frame-pointer null_deref.c -o /tmp/nd 2>&1 | annotate "build"
+          ASAN_OPTIONS=color=never /tmp/nd 2>&1 | annotate "raw asan null_deref"
