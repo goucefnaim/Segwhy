@@ -1,0 +1,5 @@
+==1==ERROR: AddressSanitizer: BUS on unknown address (pc 0x0001040b8888 bp 0x2 sp 0x3 T0)
+==1==The signal is caused by a WRITE memory access.
+    #0 0x0001040b8888 in main string_literal.c:7
+SUMMARY: AddressSanitizer: BUS string_literal.c:7 in main
+==1==ABORTING

@@ -1,0 +1,9 @@
+==1==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x1 bp 0x2 sp 0x3 T0)
+==1==The signal is caused by a READ memory access.
+==1==Hint: address points to the zero page.
+    #0 0x000188c2e1b4 in _platform_strlen+0x4 (libsystem_platform.dylib:arm64e+0x11b4)
+    #1 0x000104e2c9a0 in wrap_strlen+0x50 (libclang_rt.asan_osx_dynamic.dylib:arm64e+0x149a0)
+    #2 0x0001044188ac in main libc_null.c:9
+    #3 0x000188b104e0 in start+0x1b4c (dyld:arm64e+0x204e0)
+SUMMARY: AddressSanitizer: SEGV (libsystem_platform.dylib:arm64e+0x11b4) in _platform_strlen+0x4
+==1==ABORTING

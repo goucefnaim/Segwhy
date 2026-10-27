@@ -1,0 +1,13 @@
+=================================================================
+==42==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x503000000054 at pc 0x1 bp 0x2 sp 0x3
+WRITE of size 4 at 0x503000000054 thread T0
+    #0 0x55b996773237 in main /src/heap_overflow.c:8
+    #1 0x7f3e5b62a1c9 in __libc_start_call_main ../sysdeps/nptl/libc_start_call_main.h:58
+
+0x503000000054 is located 0 bytes after 20-byte region [0x503000000040,0x503000000054)
+allocated by thread T0 here:
+    #0 0x7f3e5bafd9c7 in malloc ../../../../src/libsanitizer/asan/asan_malloc_linux.cpp:69
+    #1 0x55b9967731de in main /src/heap_overflow.c:5
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/heap_overflow.c:8 in main
+==42==ABORTING

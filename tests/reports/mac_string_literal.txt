@@ -1,0 +1,6 @@
+==1==ERROR: AddressSanitizer: BUS on unknown address 0x000102a3bf80 (pc 0x000102a3b8f0 bp 0x2 sp 0x3 T0)
+==1==The signal is caused by a WRITE memory access.
+    #0 0x000102a3b8f0 in main string_literal.c:7
+    #1 0x000188b104e0 in start+0x1b4c (dyld:arm64e+0x204e0)
+SUMMARY: AddressSanitizer: BUS string_literal.c:7 in main
+==1==ABORTING

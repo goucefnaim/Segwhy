@@ -1,0 +1,5 @@
+==1==ERROR: AddressSanitizer: stack-overflow on address 0x00016d107ffc (pc 0x0001024fc81c bp 0x2 sp 0x3 T0)
+    #0 0x0001024fc81c in factorial recursion.c:4
+
+SUMMARY: AddressSanitizer: stack-overflow recursion.c:4 in factorial
+==1==ABORTING

@@ -1,0 +1,9 @@
+==1==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x1 bp 0x2 sp 0x3 T0)
+==1==The signal is caused by a READ memory access.
+==1==Hint: address points to the zero page.
+    #0 0x000100f2c81c in value_length parser.c:17
+    #1 0x000100f2c9a0 in parse_config parser.c:29
+    #2 0x000100f2c3a8 in main main.c:9
+    #3 0x000188b104e0 in start+0x1b4c (dyld:arm64e+0x204e0)
+SUMMARY: AddressSanitizer: SEGV parser.c:17 in value_length
+==1==ABORTING

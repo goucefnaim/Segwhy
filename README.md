@@ -122,12 +122,13 @@ returns 1, a crash under gdb returns 128 + the signal number (139 for a segfault
 
 ## Contributing
 
-Each case segwhy understands has a small crashing program in `tests/crashes/`.
-To add one: write the program, add what segwhy should say to `tests/test_segwhy.py`, run `pytest`.
+segwhy is a small, dependency-free Python project with one file per job and a comment on every
+function. [CONTRIBUTING.md](CONTRIBUTING.md) explains how the pieces fit and how to add a crash case,
+a report from another system or a new language.
+
 Found an output that is wrong or unclear? [Open an issue](https://github.com/goucefnaim/Segwhy/issues)
-with the C code and what segwhy printed.
-Reports from other compilers and systems (macOS, Alpine, older gcc) are very welcome: open an issue with
-the raw AddressSanitizer output (`--verbose` helps).
+with the C code and what segwhy printed. Reports from other compilers and systems (macOS, Alpine,
+older gcc) are very welcome too: include the raw AddressSanitizer output.
 
 ## License
 
@@ -166,3 +167,7 @@ Pour avoir les messages en français à chaque fois sans taper `--fr`, ajoute `e
 segwhy détecte les pointeurs NULL, les dépassements de tableau (avec l'indice fautif), l'utilisation
 après `free()`, les doubles `free()`, les récursions infinies, l'écriture dans une chaîne littérale,
 les divisions par zéro, les `assert()` ratés et, quand rien n'a planté, les fuites mémoire.
+
+Envie de l'améliorer ou d'en faire ta propre version ? Le code est découpé en un fichier par rôle,
+chaque fonction est commentée, et [CONTRIBUTING.md](CONTRIBUTING.md#en-français) explique comment
+ajouter un cas, un rapport ou une langue.

@@ -1,4 +1,10 @@
-"""Data shared by the ASan parser, the gdb runner and the renderer."""
+"""The two data types everything else works on.
+
+- Frame: one line of a call stack ("main.c:12 in main()").
+- Diagnosis: everything segwhy found out about one crash.
+
+Parsers (sanitizers.py, debugger.py) create a Diagnosis, render.py prints it.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +13,10 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-# Paths that never belong to the user's own code.
-_SYSTEM_MARKERS = (
+from .source import find_recursive_call
+
+# Paths that never belong to the user's own code (compiler and C library sources).
+SYSTEM_PATH_MARKERS = (
     "/libsanitizer/",
     "/compiler-rt/",
     "/sanitizer_common/",
@@ -22,43 +30,51 @@ _SYSTEM_MARKERS = (
     "/Applications/Xcode",
 )
 
-# Suffixes glibc adds to optimized variants of string functions.
-_LIB_SUFFIX = re.compile(
+# Suffixes glibc adds to its optimized string functions (__strlen_avx2 -> strlen).
+_LIBRARY_SUFFIX = re.compile(
     r"_(?:avx2|avx512|evex|sse2|sse4_1|sse4_2|ssse3|erms|unaligned|aligned|"
     r"rtm|base|internal|l_internal|l|chk|nocancel|generic)(?:_\w+)?$"
 )
 
+# How many times a function must appear at the top of the stack to call it recursive.
+RECURSION_MIN_REPEATS = 8
+
 
 @dataclass
 class Frame:
-    func: Optional[str] = None
-    file: Optional[str] = None
-    line: Optional[int] = None
+    """One line of a call stack. Every field can be missing."""
+
+    func: Optional[str] = None    # function name: "main", "__strlen_avx2"
+    file: Optional[str] = None    # source file: "main.c", "/home/me/project/main.c"
+    line: Optional[int] = None    # line number in that file
     column: Optional[int] = None
-    module: Optional[str] = None
+    module: Optional[str] = None  # binary or library, when there is no file: "libc.so.6"
 
     @property
     def has_location(self) -> bool:
+        """True when we know the file and the line."""
         return bool(self.file) and self.line is not None
 
     def is_user_code(self) -> bool:
-        """True when the frame points into the user's own source files."""
+        """True when the frame points into the user's own source files,
+        not into the C library or the sanitizer runtime."""
         if not self.has_location:
             return False
         path = self.file or ""
         if path.startswith("../") or path.startswith("<"):
             return False
-        if any(marker in path for marker in _SYSTEM_MARKERS):
+        if any(marker in path for marker in SYSTEM_PATH_MARKERS):
             return False
         if os.path.isabs(path):
             return True
         # Relative paths like "nptl/pthread_kill.c" come from system libraries
-        # built elsewhere: only trust the ones that exist here (resolve_frames
+        # built elsewhere: only trust the ones that exist here (source.resolve_frames
         # has already turned the user's own relative paths into real ones).
         return os.path.exists(path)
 
     def clean_func(self) -> Optional[str]:
-        """Public-looking name of a library function (__strlen_avx2 -> strlen)."""
+        """The public name of a library function, as the user wrote it in their
+        code: __strlen_avx2 -> strlen, _platform_strlen+0x4 -> strlen."""
         if not self.func:
             return None
         name = self.func.split("(")[0].strip()
@@ -67,52 +83,62 @@ class Frame:
             if name.startswith(prefix):
                 name = name[len(prefix):]
         name = name.lstrip("_")
-        for prefix in ("GI_", "platform_", "wrap_", "interceptor_"):  # glibc, macOS libplatform, ASan
+        for prefix in ("GI_", "platform_", "wrap_", "interceptor_"):  # glibc, macOS, ASan
             if name.startswith(prefix):
                 name = name[len(prefix):].lstrip("_")
         previous = None
         while previous != name:
             previous = name
-            name = _LIB_SUFFIX.sub("", name)
+            name = _LIBRARY_SUFFIX.sub("", name)
         return name or self.func
 
 
 @dataclass
 class Diagnosis:
-    """Everything segwhy found out about one crash."""
+    """Everything segwhy found out about one crash.
 
-    kind: str  # see messages.REASONS for the list
-    source: str = "asan"  # "asan" or "gdb"
-    access: Optional[str] = None  # "READ" or "WRITE"
-    access_size: Optional[int] = None
-    address: Optional[int] = None
-    signal: Optional[str] = None
-    frames: List[Frame] = field(default_factory=list)
-    freed_at: Optional[Frame] = None
-    allocated_at: Optional[Frame] = None
-    region_size: Optional[int] = None
-    region_relation: Optional[str] = None  # "after", "before", "inside"
-    region_distance: Optional[int] = None
-    var_name: Optional[str] = None
-    var_line: Optional[int] = None
-    raw_kind: Optional[str] = None
-    raw: str = ""
+    `kind` says what went wrong (see kinds.py). The other fields are details
+    that make the explanation more precise; each parser fills what it can."""
 
-    # ---- helpers used by the renderer -------------------------------------
+    kind: str
+    source: str = "asan"                     # who found it: "asan", "ubsan" or "gdb"
+    frames: List[Frame] = field(default_factory=list)  # call stack, innermost first
+    access: Optional[str] = None             # "READ" or "WRITE"
+    access_size: Optional[int] = None        # bytes read or written (4 for an int)
+    address: Optional[int] = None            # the bad address
+    signal: Optional[str] = None             # "SIGSEGV"... (gdb only)
+    freed_at: Optional[Frame] = None         # where the memory was freed (use after free)
+    allocated_at: Optional[Frame] = None     # where the memory was allocated
+    region_size: Optional[int] = None        # size of the array or block, in bytes
+    region_relation: Optional[str] = None    # the access was "after", "before" or "inside" it
+    region_distance: Optional[int] = None    # how many bytes away
+    var_name: Optional[str] = None           # name of the array, when known
+    var_line: Optional[int] = None           # line where that array is declared
+    raw_kind: Optional[str] = None           # the tool's own name for the error
+    raw: str = ""                            # the original report text
 
     def user_frames(self) -> List[Frame]:
+        """The frames that are in the user's own code."""
         return [f for f in self.frames if f.is_user_code()]
 
+    def has_debug_info(self) -> bool:
+        """True when at least one frame has a file and line in the user's code
+        (false when the program was compiled without -g)."""
+        return bool(self.user_frames())
+
     def main_frame(self) -> Optional[Frame]:
-        """The line to show: first frame in the user's code."""
+        """The line to show the user: the first one in their own code.
+
+        For an infinite recursion, that's the line of the recursive call rather
+        than the first line of the function."""
         if self.kind == "stack_exhaustion":
             recursive = self.recursive_function()
             if recursive:
-                # Show the recursive call, not the function's first line.
                 calls = [f for f in self.user_frames() if f.func == recursive]
                 if len(calls) > 1:
                     return calls[1]
             else:
+                # Only the top of the recursion is known (macOS): read the source.
                 top = next(iter(self.user_frames()), None)
                 if top is not None:
                     line = find_recursive_call(top.file, top.func, top.line)
@@ -124,12 +150,13 @@ class Diagnosis:
         return self.frames[0] if self.frames else None
 
     def library_function(self) -> Optional[str]:
-        """Name of the library function the crash happened in, if any."""
+        """When the crash happened inside a library function called by the
+        user (strlen(NULL)...), the name of that function. None otherwise."""
         if not self.frames or self.frames[0].is_user_code():
             return None
         if not self.user_frames():
             return None
-        # The frame right before the user's code is the call they wrote.
+        # The last library frame before the user's code is the call they wrote.
         previous = None
         for frame in self.frames:
             if frame.is_user_code():
@@ -138,6 +165,7 @@ class Diagnosis:
         return previous.clean_func() if previous else None
 
     def recursive_function(self) -> Optional[str]:
+        """Name of the function that fills the top of the stack, if one does."""
         head = [f.func for f in self.frames[:64] if f.func]
         if not head:
             return None
@@ -145,10 +173,11 @@ class Diagnosis:
         for name in head:
             counts[name] = counts.get(name, 0) + 1
         name, count = max(counts.items(), key=lambda item: item[1])
-        return name if count >= 8 else None
+        return name if count >= RECURSION_MIN_REPEATS else None
 
     def self_calling_function(self) -> Optional[str]:
-        """Recursive function seen in the stack, or found in the source code."""
+        """Like recursive_function(), but also checks the source code when the
+        report only shows the top of the stack (macOS)."""
         name = self.recursive_function()
         if name:
             return name
@@ -156,121 +185,3 @@ class Diagnosis:
         if top is not None and find_recursive_call(top.file, top.func, top.line) is not None:
             return top.func
         return None
-
-    def has_debug_info(self) -> bool:
-        return bool(self.user_frames())
-
-
-_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "build", "dist", ".cache"}
-
-
-class SourceFinder:
-    """Find the real file behind a path from a report.
-
-    macOS reports only "parser.c" for "project/parser.c", so a relative path
-    that doesn't exist is looked up by name among the files given to segwhy,
-    then in the current directory tree."""
-
-    def __init__(self, sources: Optional[List[str]] = None, max_files: int = 20000, max_depth: int = 6):
-        self.by_name = {}
-        for source in sources or []:
-            self.by_name.setdefault(os.path.basename(source), os.path.abspath(source))
-        self.max_files = max_files
-        self.max_depth = max_depth
-        self._scanned = False
-
-    def _scan(self) -> None:
-        self._scanned = True
-        count = 0
-        root = os.getcwd()
-        base_depth = root.rstrip(os.sep).count(os.sep)
-        for directory, dirs, files in os.walk(root):
-            dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and not d.startswith(".")]
-            if directory.count(os.sep) - base_depth >= self.max_depth:
-                dirs[:] = []
-            for name in files:
-                if name.endswith((".c", ".h", ".cc", ".cpp", ".inc")):
-                    self.by_name.setdefault(name, os.path.join(directory, name))
-                count += 1
-                if count > self.max_files:
-                    return
-
-    def resolve(self, path: Optional[str]) -> Optional[str]:
-        if not path or os.path.isabs(path) or os.path.exists(path):
-            return path
-        if path.startswith("../") or path.startswith("<") or "/" in path.strip("./"):
-            return path  # system library paths like nptl/pthread_kill.c
-        name = os.path.basename(path)
-        if name not in self.by_name and not self._scanned:
-            self._scan()
-        return self.by_name.get(name, path)
-
-
-def resolve_frames(diag: "Diagnosis", finder: SourceFinder) -> "Diagnosis":
-    for frame in [*diag.frames, diag.freed_at, diag.allocated_at]:
-        if frame is not None and frame.file:
-            frame.file = finder.resolve(frame.file)
-    return diag
-
-
-def find_recursive_call(path: Optional[str], func: Optional[str], near_line: Optional[int]) -> Optional[int]:
-    """Line where `func` calls itself, read from the source (for reports that
-    show only the top of an infinite recursion, like macOS)."""
-    if not path or not func or not near_line:
-        return None
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            lines = handle.read().splitlines()
-    except OSError:
-        return None
-    call = re.compile(r"\b" + re.escape(func) + r"\s*\(")
-    start = None
-    for number in range(min(near_line, len(lines)), 0, -1):
-        text = lines[number - 1]
-        if call.search(text) and ";" not in text.split("//")[0]:
-            start = number  # the function's definition line
-            break
-    if start is None:
-        return None
-    depth, opened = 0, False
-    for number in range(start, len(lines) + 1):
-        text = re.sub(r'"(?:\\.|[^"\\])*"', '""', lines[number - 1].split("//")[0])
-        if opened and call.search(text):
-            return number
-        if number == start and opened is False and "{" in text:
-            # Body starting on the definition line: look after the brace.
-            after = text.split("{", 1)[1]
-            if call.search(after):
-                return number
-        depth += text.count("{") - text.count("}")
-        if "{" in text:
-            opened = True
-        if opened and depth <= 0:
-            return None
-    return None
-
-
-def display_path(path: Optional[str]) -> str:
-    """Shorten a path relative to the current directory when possible."""
-    if not path:
-        return "?"
-    try:
-        relative = os.path.relpath(path)
-    except ValueError:
-        return path
-    if relative.startswith("../../"):
-        return path
-    return relative
-
-
-def read_source_line(path: Optional[str], line: Optional[int]) -> Optional[str]:
-    if not path or not line:
-        return None
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            for number, text in enumerate(handle, start=1):
-                if number == line:
-                    return text.rstrip("\n").rstrip()
-    except OSError:
-        return None
-    return None

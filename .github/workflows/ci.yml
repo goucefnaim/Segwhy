@@ -21,6 +21,16 @@ jobs:
         run: pip install -e . pytest
       - name: Run tests
         run: pytest -q
+      - name: Check a real install (like users do)
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install -q .
+          cd /tmp
+          /tmp/venv/bin/segwhy --version
+          gcc -g -O0 "$GITHUB_WORKSPACE/tests/crashes/null_deref.c" -o /tmp/nd
+          /tmp/venv/bin/segwhy /tmp/nd 2>&1 | tee out.txt || true
+          grep -q "'n' is NULL" out.txt
+          /tmp/venv/bin/segwhy --fr --help | grep -q Utilisation
 
   macos:
     runs-on: macos-latest

@@ -1,0 +1,2 @@
+div_zero.c:5:18: runtime error: division by zero
+SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior div_zero.c:5:18
